@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from faster_whisper import WhisperModel
+import torch
+import whisper
 from tqdm import tqdm
 
 from autosubtitle.srt import SubtitleSegment, build_srt
@@ -31,6 +32,9 @@ class SubtitleGenerator:
         bilingual: bool,
         verbose: bool,
     ) -> None:
+        device = self._resolve_device(device)
+        self.fp16 = self._resolve_fp16(compute_type, device)
+
         self.language = language
         self.beam_size = beam_size
         self.overwrite = overwrite
@@ -38,11 +42,7 @@ class SubtitleGenerator:
         self.translate = translate
         self.target_language = target_language
         self.bilingual = bilingual
-        self.model = WhisperModel(
-            model_size_or_path=model_name,
-            device=device,
-            compute_type=compute_type,
-        )
+        self.model = whisper.load_model(model_name, device=device)
         self.translator = (
             SubtitleTranslator(target_language=target_language, bilingual=bilingual)
             if translate
@@ -72,20 +72,52 @@ class SubtitleGenerator:
         return result
 
     def _transcribe_to_srt(self, video_path: Path, output_path: Path) -> None:
-        segments, info = self.model.transcribe(
+        transcription = self.model.transcribe(
             str(video_path),
             language=self.language,
             beam_size=self.beam_size,
-            vad_filter=True,
+            fp16=self.fp16,
+            verbose=self.verbose,
         )
 
         subtitle_segments = [
-            SubtitleSegment(start=segment.start, end=segment.end, text=segment.text)
-            for segment in segments
+            SubtitleSegment(
+                start=float(segment["start"]),
+                end=float(segment["end"]),
+                text=str(segment["text"]),
+            )
+            for segment in transcription["segments"]
         ]
         if self.translator is not None:
             subtitle_segments = self.translator.translate_segments(
                 subtitle_segments,
-                source_language=info.language,
+                source_language=transcription.get("language"),
             )
         output_path.write_text(build_srt(subtitle_segments), encoding="utf-8")
+
+    @staticmethod
+    def _resolve_device(device: str) -> str:
+        if device == "auto":
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA was requested, but PyTorch cannot access the GPU. "
+                "Run this project in the NVIDIA PyTorch container described "
+                "in README.md, or use --device cpu."
+            )
+        return device
+
+    @staticmethod
+    def _resolve_fp16(compute_type: str, device: str) -> bool:
+        if compute_type == "auto":
+            return device == "cuda"
+        if compute_type == "float16":
+            if device != "cuda":
+                raise ValueError("float16 inference requires CUDA")
+            return True
+        if compute_type == "float32":
+            return False
+        raise ValueError(
+            "Unsupported compute type for OpenAI Whisper: "
+            f"{compute_type}. Choose auto, float16, or float32."
+        )

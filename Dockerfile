@@ -1,0 +1,16 @@
+FROM nvcr.io/nvidia/pytorch:25.11-py3
+
+WORKDIR /workspace/Autosubtitle
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ffmpeg \
+    && ffmpeg -version \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY autosubtitle ./autosubtitle
+COPY main.py ./main.py
+
+ENTRYPOINT ["python", "main.py"]

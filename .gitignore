@@ -1,3 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
+videos
+# Local video files
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.m4v
+*.webm

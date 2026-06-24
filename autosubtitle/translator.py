@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import replace
 
 from autosubtitle.srt import SubtitleSegment
@@ -56,10 +57,7 @@ class SubtitleTranslator:
 
         for segment, translated in zip(segments, translated_texts, strict=True):
             translated_text = self._postprocess_text(translated)
-            if self.bilingual and translated_text.strip():
-                merged_text = f"{segment.text.strip()}\n{translated_text}"
-            else:
-                merged_text = translated_text
+            merged_text = self._merge_text(segment.text, translated_text)
             translated_segments.append(replace(segment, text=merged_text))
 
         return translated_segments
@@ -74,12 +72,33 @@ class SubtitleTranslator:
 
         translator = self._translator_cls(source=source_language, target=self.target_language)
         translated: list[str] = []
+        failed_texts: list[str] = []
 
         batch_size = 50
         for batch_start in range(0, len(texts), batch_size):
             batch = texts[batch_start : batch_start + batch_size]
-            translated_batch = translator.translate_batch(batch)
-            translated.extend(self._coerce_batch_result(batch, translated_batch))
+            try:
+                translated_batch = translator.translate_batch(batch)
+                translated.extend(self._coerce_batch_result(batch, translated_batch))
+            except Exception:
+                for text in batch:
+                    if not text.strip():
+                        translated.append(text)
+                        continue
+                    try:
+                        translated_text = translator.translate(text)
+                        translated.append(translated_text or text)
+                    except Exception:
+                        translated.append(text)
+                        failed_texts.append(text)
+
+        if failed_texts:
+            warnings.warn(
+                f"Translation failed for {len(failed_texts)} subtitle line(s); "
+                "the original text was kept.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         return translated
 
@@ -89,10 +108,26 @@ class SubtitleTranslator:
         translated_batch: str | list[str] | None,
     ) -> list[str]:
         if translated_batch is None:
-            return source_texts
+            raise ValueError("Translator returned no batch result")
         if isinstance(translated_batch, str):
+            if len(source_texts) != 1:
+                raise ValueError("Translator returned one result for multiple inputs")
             return [translated_batch]
-        return [item if item is not None else source for source, item in zip(source_texts, translated_batch)]
+        if len(translated_batch) != len(source_texts):
+            raise ValueError("Translator returned an incomplete batch result")
+        return [
+            item if item is not None else source
+            for source, item in zip(source_texts, translated_batch, strict=True)
+        ]
+
+    def _merge_text(self, source_text: str, translated_text: str) -> str:
+        source = source_text.strip()
+        translated = translated_text.strip()
+        if not translated or translated == source:
+            return source
+        if self.bilingual:
+            return f"{source}\n{translated}"
+        return translated
 
     def _postprocess_text(self, text: str) -> str:
         if self.target_language.lower() == "zh-tw":
@@ -106,9 +141,6 @@ class SubtitleTranslator:
         converted_segments: list[SubtitleSegment] = []
         for segment in segments:
             converted_text = self._opencc.convert(segment.text)
-            if self.bilingual and converted_text.strip():
-                merged_text = f"{segment.text.strip()}\n{converted_text}"
-            else:
-                merged_text = converted_text
+            merged_text = self._merge_text(segment.text, converted_text)
             converted_segments.append(replace(segment, text=merged_text))
         return converted_segments

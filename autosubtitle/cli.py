@@ -28,14 +28,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        default="auto",
+        default="cuda",
         choices=["auto", "cpu", "cuda"],
-        help="Inference device",
+        help="Inference device (default: cuda)",
     )
     parser.add_argument(
         "--compute-type",
         default="auto",
-        help="faster-whisper compute type, for example auto, int8, float16",
+        choices=["auto", "float16", "float32"],
+        help="PyTorch precision (default: auto; CUDA uses float16)",
     )
     parser.add_argument(
         "--beam-size",
@@ -49,9 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing subtitle files",
     )
     parser.add_argument(
-        "--no-translate",
+        "--translate",
         action="store_true",
-        help="Disable subtitle translation and keep original transcription text",
+        help="Translate subtitles after transcription (disabled by default)",
     )
     parser.add_argument(
         "--target-language",
@@ -103,15 +104,15 @@ def main() -> int:
             compute_type=args.compute_type,
             beam_size=args.beam_size,
             overwrite=args.overwrite,
-            translate=not args.no_translate,
+            translate=args.translate,
             target_language=args.target_language,
             bilingual=args.bilingual,
             verbose=args.verbose,
         )
-    except ImportError as exc:
+    except (ImportError, RuntimeError, ValueError) as exc:
         print(
-            "Missing dependency. Please install requirements first with: "
-            "pip install -r requirements.txt"
+            "Unable to initialize Whisper. For GB10 CUDA support, use the "
+            "NVIDIA PyTorch container described in README.md."
         )
         print(f"Details: {exc}")
         return 1
