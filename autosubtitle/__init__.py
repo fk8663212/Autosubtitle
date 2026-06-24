@@ -1,0 +1,1 @@
+"""Autosubtitle package."""
