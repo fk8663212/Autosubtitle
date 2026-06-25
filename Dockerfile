@@ -1,5 +1,7 @@
 FROM nvcr.io/nvidia/pytorch:25.11-py3
 
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /workspace/Autosubtitle
 
 RUN apt-get update \

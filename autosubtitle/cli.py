@@ -5,6 +5,7 @@ from pathlib import Path
 
 from autosubtitle.config import load_translation_config
 from autosubtitle.video_scan import collect_video_files
+from autosubtitle.watcher import watch_video_files
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +23,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--recursive",
         action="store_true",
         help="Scan subdirectories recursively",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep watching the folder and process new or changed videos",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=2.0,
+        help="Seconds between folder scans in watch mode (default: 2)",
+    )
+    parser.add_argument(
+        "--stable-seconds",
+        type=float,
+        default=10.0,
+        help="Wait until a video is unchanged for this many seconds (default: 10)",
     )
     parser.add_argument(
         "--model",
@@ -88,9 +106,13 @@ def main() -> int:
         parser.error(f"Input directory does not exist: {args.input_dir}")
     if not args.input_dir.is_dir():
         parser.error(f"Input path is not a directory: {args.input_dir}")
+    if args.poll_interval <= 0:
+        parser.error("--poll-interval must be greater than 0")
+    if args.stable_seconds < 0:
+        parser.error("--stable-seconds cannot be negative")
 
     videos = collect_video_files(args.input_dir, recursive=args.recursive)
-    if not videos:
+    if not videos and not args.watch:
         print("No supported video files found.")
         return 0
 
@@ -128,11 +150,14 @@ def main() -> int:
         )
     except (ImportError, RuntimeError, ValueError) as exc:
         print(
-            "Unable to initialize Whisper. For GB10 CUDA support, use the "
-            "NVIDIA PyTorch container described in README.md."
+            "Unable to initialize Whisper. For GB10 CUDA support, see "
+            "GB10_DGX_SPARK.md."
         )
         print(f"Details: {exc}")
         return 1
+
+    if args.watch:
+        return _watch_folder(generator, args)
 
     result = generator.process_files(videos)
 
@@ -141,3 +166,28 @@ def main() -> int:
         f"skipped {result.skipped}, failed {result.failed}."
     )
     return 0 if result.failed == 0 else 1
+
+
+def _watch_folder(generator: object, args: argparse.Namespace) -> int:
+    print(
+        f"Watching {args.input_dir} for videos "
+        f"(stable for {args.stable_seconds:g}s before processing)."
+    )
+    print("Press Ctrl+C to stop.")
+
+    try:
+        for video_path in watch_video_files(
+            args.input_dir,
+            recursive=args.recursive,
+            poll_interval=args.poll_interval,
+            stable_seconds=args.stable_seconds,
+        ):
+            print(f"Detected ready video: {video_path}")
+            result = generator.process_files([video_path])
+            print(
+                f"Watch result. Generated {result.generated}, "
+                f"skipped {result.skipped}, failed {result.failed}."
+            )
+    except KeyboardInterrupt:
+        print("\nStopped watching.")
+    return 0

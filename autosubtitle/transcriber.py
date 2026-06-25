@@ -113,7 +113,7 @@ class SubtitleGenerator:
             raise RuntimeError(
                 "CUDA was requested, but PyTorch cannot access the GPU. "
                 "Run this project in the NVIDIA PyTorch container described "
-                "in README.md, or use --device cpu."
+                "in GB10_DGX_SPARK.md, or use --device cpu."
             )
         return device
 

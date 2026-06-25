@@ -7,6 +7,7 @@
 ## 功能
 
 - 掃描指定資料夾中的影片
+- 持續監看新加入或更新的影片
 - 支援遞迴掃描子資料夾
 - 為每支影片輸出同名 `.srt`
 - 可指定 Whisper 模型大小
@@ -19,46 +20,32 @@
 
 - Python 3.11+
 - `ffmpeg`
+- PyTorch（使用 GPU 時需安裝與 CUDA 相容的版本）
 
-## GB10 / DGX Spark 安裝（建議）
+若使用 NVIDIA GB10／DGX Spark，請改看 [GB10 / DGX Spark 安裝指南](GB10_DGX_SPARK.md)。
 
-GB10 是 ARM64 Grace Blackwell 平台，建議使用 NVIDIA NGC PyTorch 容器，以取得相容的 CUDA 與 PyTorch：
+## 安裝
 
-本專案固定使用 `nvcr.io/nvidia/pytorch:25.11-py3`，其 CUDA 13.0 與目前 GB10 驅動相容，並提供 ARM64 映像。
-
-```bash
-sudo docker build --no-cache -t autosubtitle-gb10 .
-```
-
-建置時會一併安裝 Whisper 讀取影音所需的 `ffmpeg`。建置後可先確認 PyTorch 是否辨識到 GB10：
+先安裝 `ffmpeg`。Ubuntu／Debian：
 
 ```bash
-sudo docker run --rm --gpus all \
-  --entrypoint python autosubtitle-gb10 \
-  -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+sudo apt update
+sudo apt install ffmpeg
 ```
 
-預期輸出包含 `True NVIDIA GB10`。
-
-執行時掛載影片資料夾與 Whisper 模型快取：
-
-```bash
-sudo docker run --rm --gpus all \
-  --network host \
-  -v "$PWD/videos:/data" \
-  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
-  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
-  autosubtitle-gb10 /data
-```
-
-第一次執行會下載 Whisper 模型。預設使用 CUDA 與 FP16。
-
-## 一般安裝
+建立 Python 虛擬環境並安裝相依套件：
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+確認 Whisper 可使用的裝置：
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 ## 使用方式
@@ -69,7 +56,11 @@ pip install -r requirements.txt
 python3 main.py videos
 ```
 
-預設使用 CUDA 執行辨識；若要改用 CPU，可加上 `--device cpu --compute-type float32`。
+程式預設使用 CUDA。沒有可用 CUDA GPU 時，請改用 CPU：
+
+```bash
+python3 main.py videos --device cpu --compute-type float32
+```
 
 指定辨識語言：
 
@@ -93,6 +84,35 @@ python3 main.py videos --translate --bilingual
 
 ```bash
 python3 main.py videos --recursive --overwrite
+```
+
+## 監看資料夾
+
+持續監看 `videos`，新影片寫入完成後自動產生字幕：
+
+```bash
+python3 main.py videos --watch
+```
+
+連同子資料夾一起監看：
+
+```bash
+python3 main.py videos --watch --recursive
+```
+
+監看模式預設每 2 秒掃描一次，影片大小與修改時間連續 10 秒不變才會開始處理，避免讀取尚未複製完成的檔案。可用 `--poll-interval` 與 `--stable-seconds` 調整。
+
+離開終端後持續監看：
+
+```bash
+nohup .venv/bin/python main.py videos --watch --recursive \
+  > autosubtitle.log 2>&1 &
+```
+
+查看日誌：
+
+```bash
+tail -f autosubtitle.log
 ```
 
 ## 支援副檔名
@@ -161,22 +181,10 @@ export OPENAI_API_KEY="你的金鑰"
 python3 main.py videos --translate
 ```
 
-Docker 使用 API 模式時，加上 `-e OPENAI_API_KEY`：
-
-```bash
-sudo docker run --rm --gpus all \
-  -e OPENAI_API_KEY \
-  -v "$PWD/videos:/data" \
-  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
-  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
-  autosubtitle-gb10 /data --translate
-```
-
-本地模式支援提供 OpenAI-compatible API 的服務，例如 Ollama 或 vLLM。若服務跑在主機上，Docker 指令需保留 `--network host`。
+本地模式支援提供 OpenAI-compatible API 的服務，例如 Ollama 或 vLLM。
 
 ## 後續可擴充
 
 - 產生 `.vtt`
 - 批次加上雙語字幕
-- 監看資料夾新影片並自動處理
 - 提供桌面 GUI
