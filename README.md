@@ -44,8 +44,10 @@ sudo docker run --rm --gpus all \
 
 ```bash
 sudo docker run --rm --gpus all \
+  --network host \
   -v "$PWD/videos:/data" \
   -v "$HOME/.cache/whisper:/root/.cache/whisper" \
+  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
   autosubtitle-gb10 /data
 ```
 
@@ -78,7 +80,7 @@ python3 main.py videos --model small --language zh
 如需暫時啟用既有翻譯模組：
 
 ```bash
-python3 main.py videos --translate --target-language zh-TW
+python3 main.py videos --translate
 ```
 
 輸出雙語字幕：
@@ -123,11 +125,54 @@ videos/demo.srt
 ## 翻譯說明
 
 - 翻譯預設不啟用
-- 加上 `--translate` 才會執行既有翻譯模組
-- 翻譯目標語言預設是 `zh-TW`
-- 目前翻譯使用 Google Translate 介面，因此執行翻譯時需要網路
+- 加上 `--translate` 才會執行 LLM 翻譯模組
+- 使用 `config.toml` 選擇 API 或本地模型
+- `--config` 可載入其他設定檔
+- `--target-language` 與 `--bilingual` 可覆寫設定檔
 - 若加上 `--bilingual`，每個字幕區塊會先放原文，再放翻譯內容
-- 若來源語言與目標語言相同，系統會直接保留原字幕文字
+
+### 翻譯模型設定
+
+編輯 `config.toml`：
+
+```toml
+[translation]
+mode = "local" # 可選 "api" 或 "local"
+target_language = "zh-TW"
+bilingual = false
+batch_size = 20
+timeout_seconds = 120
+
+[translation.api]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[translation.local]
+model = "qwen3:8b"
+base_url = "http://127.0.0.1:11434/v1"
+api_key_env = ""
+```
+
+API 模式不會把金鑰寫入設定檔。先設定環境變數：
+
+```bash
+export OPENAI_API_KEY="你的金鑰"
+python3 main.py videos --translate
+```
+
+Docker 使用 API 模式時，加上 `-e OPENAI_API_KEY`：
+
+```bash
+sudo docker run --rm --gpus all \
+  -e OPENAI_API_KEY \
+  -v "$PWD/videos:/data" \
+  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
+  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
+  autosubtitle-gb10 /data --translate
+```
+
+本地模式支援提供 OpenAI-compatible API 的服務，例如 Ollama 或 vLLM。若服務跑在主機上，Docker 指令需保留 `--network host`。
 
 ## 後續可擴充
 

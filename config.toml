@@ -1,0 +1,18 @@
+[translation]
+# Choose "api" for a hosted service or "local" for an OpenAI-compatible server.
+mode = "local"
+target_language = "zh-TW"
+bilingual = false
+batch_size = 20
+timeout_seconds = 120
+
+[translation.api]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[translation.local]
+# Example for Ollama. Replace this with any model installed on your local server.
+model = "qwen3.6"
+base_url = "http://localhost:11434/v1"
+api_key_env = ""

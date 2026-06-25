@@ -12,5 +12,6 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY autosubtitle ./autosubtitle
 COPY main.py ./main.py
+COPY config.toml ./config.toml
 
 ENTRYPOINT ["python", "main.py"]

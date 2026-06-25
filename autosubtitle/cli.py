@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from autosubtitle.config import load_translation_config
 from autosubtitle.video_scan import collect_video_files
 
 
@@ -11,6 +12,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Generate external .srt subtitles for every video in a folder."
     )
     parser.add_argument("input_dir", type=Path, help="Folder containing video files")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("config.toml"),
+        help="Translation config file (default: config.toml)",
+    )
     parser.add_argument(
         "--recursive",
         action="store_true",
@@ -56,13 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--target-language",
-        default="zh-TW",
-        help="Translate subtitles to this language. Default: zh-TW",
+        default=None,
+        help="Override the target language from config.toml",
     )
     parser.add_argument(
         "--bilingual",
         action="store_true",
-        help="Keep original text and translated text together in each subtitle block",
+        default=None,
+        help="Override config.toml and output bilingual subtitles",
     )
     parser.add_argument(
         "--verbose",
@@ -86,6 +94,14 @@ def main() -> int:
         print("No supported video files found.")
         return 0
 
+    translation_config = None
+    if args.translate:
+        try:
+            translation_config = load_translation_config(args.config)
+        except ValueError as exc:
+            print(f"Invalid configuration: {exc}")
+            return 1
+
     try:
         from autosubtitle.transcriber import SubtitleGenerator
     except ImportError as exc:
@@ -105,6 +121,7 @@ def main() -> int:
             beam_size=args.beam_size,
             overwrite=args.overwrite,
             translate=args.translate,
+            translation_config=translation_config,
             target_language=args.target_language,
             bilingual=args.bilingual,
             verbose=args.verbose,

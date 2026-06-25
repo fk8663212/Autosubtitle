@@ -7,6 +7,7 @@ import torch
 import whisper
 from tqdm import tqdm
 
+from autosubtitle.config import TranslationConfig
 from autosubtitle.srt import SubtitleSegment, build_srt
 from autosubtitle.translator import SubtitleTranslator
 
@@ -28,8 +29,9 @@ class SubtitleGenerator:
         beam_size: int,
         overwrite: bool,
         translate: bool,
-        target_language: str,
-        bilingual: bool,
+        translation_config: TranslationConfig | None,
+        target_language: str | None,
+        bilingual: bool | None,
         verbose: bool,
     ) -> None:
         device = self._resolve_device(device)
@@ -40,11 +42,15 @@ class SubtitleGenerator:
         self.overwrite = overwrite
         self.verbose = verbose
         self.translate = translate
-        self.target_language = target_language
-        self.bilingual = bilingual
+        if translate and translation_config is None:
+            raise ValueError("Translation config is required when translation is enabled")
         self.model = whisper.load_model(model_name, device=device)
         self.translator = (
-            SubtitleTranslator(target_language=target_language, bilingual=bilingual)
+            SubtitleTranslator(
+                config=translation_config,
+                target_language=target_language,
+                bilingual=bilingual,
+            )
             if translate
             else None
         )
@@ -93,7 +99,11 @@ class SubtitleGenerator:
                 subtitle_segments,
                 source_language=transcription.get("language"),
             )
-        output_path.write_text(build_srt(subtitle_segments), encoding="utf-8")
+        output_path.write_text(
+            build_srt(subtitle_segments),
+            encoding="utf-8-sig",
+            newline="\r\n",
+        )
 
     @staticmethod
     def _resolve_device(device: str) -> str:
