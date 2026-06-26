@@ -24,6 +24,48 @@
 
 若使用 NVIDIA GB10／DGX Spark，請改看 [GB10 / DGX Spark 安裝指南](GB10_DGX_SPARK.md)。
 
+若想直接用 Docker，在一般電腦可看下方的通用 Docker 版本。
+
+## Docker
+
+一般電腦可直接用通用 Docker 版本；有 GPU 時會自動用 GPU，沒有 GPU 時會退回 CPU：
+
+```bash
+sudo docker build -f Dockerfile.cpu -t autosubtitle .
+```
+
+執行時預設會自動偵測 GPU。沒有 GPU 時直接跑 CPU；如果要讓 Docker 看到 NVIDIA GPU，請加 `--gpus all`。
+
+沒有 GPU 時：
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/videos:/data" \
+  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
+  autosubtitle /data
+```
+
+如果你有 NVIDIA GPU：
+
+```bash
+sudo docker run --rm --gpus all \
+  -v "$PWD/videos:/data" \
+  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
+  autosubtitle /data
+```
+
+如果你要翻譯既有字幕：
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/videos:/data" \
+  -v "$PWD/config.toml:/app/config.toml:ro" \
+  -v "$HOME/.cache/whisper:/root/.cache/whisper" \
+  autosubtitle /data --translate
+```
+
+如果你是 NVIDIA GB10／DGX Spark，請改看 [GB10 / DGX Spark 安裝指南](GB10_DGX_SPARK.md)。
+
 ## 安裝
 
 先安裝 `ffmpeg`。Ubuntu／Debian：
@@ -68,17 +110,33 @@ python3 main.py videos --device cpu --compute-type float32
 python3 main.py videos --model small --language zh
 ```
 
-如需暫時啟用既有翻譯模組：
+啟用翻譯模組：
 
 ```bash
 python3 main.py videos --translate
 ```
+
+如果影片旁邊已經有同名 `.srt`，程式會直接翻譯既有字幕，不會重新跑 Whisper。
 
 輸出雙語字幕：
 
 ```bash
 python3 main.py videos --translate --bilingual
 ```
+
+只翻譯已存在的 `.srt`，不重新跑 Whisper：
+
+```bash
+python3 main.py videos/demo.srt --translate-srt
+```
+
+遞迴翻譯資料夾內所有現有 `.srt`：
+
+```bash
+python3 main.py videos --translate-srt --recursive
+```
+
+翻譯後會輸出成 `demo.zh-TW.srt`。如果目標檔已存在，預設會跳過；加上 `--overwrite` 可覆寫。
 
 遞迴掃描並覆寫既有字幕：
 
@@ -145,7 +203,8 @@ videos/demo.srt
 ## 翻譯說明
 
 - 翻譯預設不啟用
-- 加上 `--translate` 才會執行 LLM 翻譯模組
+- 加上 `--translate` 會執行 LLM 翻譯；若影片旁邊已有同名 `.srt`，會直接翻譯該字幕並跳過 Whisper
+- 加上 `--translate-srt` 可以只翻譯現有 `.srt`，不重新跑 Whisper
 - 使用 `config.toml` 選擇 API 或本地模型
 - `--config` 可載入其他設定檔
 - `--target-language` 與 `--bilingual` 可覆寫設定檔

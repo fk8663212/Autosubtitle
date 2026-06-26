@@ -3,16 +3,20 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from autosubtitle.config import load_translation_config
+from autosubtitle.config import TranslationConfig, load_translation_config
 from autosubtitle.video_scan import collect_video_files
 from autosubtitle.watcher import watch_video_files
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate external .srt subtitles for every video in a folder."
+        description="Generate or translate external .srt subtitles."
     )
-    parser.add_argument("input_dir", type=Path, help="Folder containing video files")
+    parser.add_argument(
+        "input_dir",
+        type=Path,
+        help="Folder containing video files, or an .srt file with --translate-srt",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -77,7 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--translate",
         action="store_true",
-        help="Translate subtitles after transcription (disabled by default)",
+        help="Translate subtitles; existing same-name .srt files skip Whisper",
+    )
+    parser.add_argument(
+        "--translate-srt",
+        action="store_true",
+        help="Translate existing .srt files without running Whisper",
     )
     parser.add_argument(
         "--target-language",
@@ -103,26 +112,32 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.input_dir.exists():
-        parser.error(f"Input directory does not exist: {args.input_dir}")
-    if not args.input_dir.is_dir():
-        parser.error(f"Input path is not a directory: {args.input_dir}")
+        parser.error(f"Input path does not exist: {args.input_dir}")
     if args.poll_interval <= 0:
         parser.error("--poll-interval must be greater than 0")
     if args.stable_seconds < 0:
         parser.error("--stable-seconds cannot be negative")
-
-    videos = collect_video_files(args.input_dir, recursive=args.recursive)
-    if not videos and not args.watch:
-        print("No supported video files found.")
-        return 0
+    if args.translate_srt and args.watch:
+        parser.error("--translate-srt cannot be used with --watch")
 
     translation_config = None
-    if args.translate:
+    if args.translate or args.translate_srt:
         try:
             translation_config = load_translation_config(args.config)
         except ValueError as exc:
             print(f"Invalid configuration: {exc}")
             return 1
+
+    if args.translate_srt:
+        return _translate_existing_srt(args, translation_config)
+
+    if not args.input_dir.is_dir():
+        parser.error(f"Input path is not a directory: {args.input_dir}")
+
+    videos = collect_video_files(args.input_dir, recursive=args.recursive)
+    if not videos and not args.watch:
+        print("No supported video files found.")
+        return 0
 
     try:
         from autosubtitle.transcriber import SubtitleGenerator
@@ -163,6 +178,40 @@ def main() -> int:
 
     print(
         f"Finished. Generated {result.generated} subtitle file(s), "
+        f"skipped {result.skipped}, failed {result.failed}."
+    )
+    return 0 if result.failed == 0 else 1
+
+
+def _translate_existing_srt(
+    args: argparse.Namespace,
+    translation_config: TranslationConfig,
+) -> int:
+    from autosubtitle.srt_translate import ExistingSrtTranslator, collect_srt_files
+    from autosubtitle.translator import SubtitleTranslator
+
+    srt_paths = collect_srt_files(args.input_dir, recursive=args.recursive)
+    if not srt_paths:
+        print("No .srt files found.")
+        return 0
+
+    target_language = args.target_language or translation_config.target_language
+    translator = SubtitleTranslator(
+        config=translation_config,
+        target_language=args.target_language,
+        bilingual=args.bilingual,
+    )
+    processor = ExistingSrtTranslator(
+        translator=translator,
+        overwrite=args.overwrite,
+        source_language=args.language,
+        target_language=target_language,
+        verbose=args.verbose,
+    )
+    result = processor.process_files(srt_paths)
+
+    print(
+        f"Finished. Generated {result.generated} translated subtitle file(s), "
         f"skipped {result.skipped}, failed {result.failed}."
     )
     return 0 if result.failed == 0 else 1

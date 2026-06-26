@@ -62,7 +62,7 @@ sudo docker run --rm --gpus all \
 
 ## 使用 LLM 翻譯
 
-翻譯模型與 API／本地模式由 `config.toml` 設定。
+翻譯模型與 API／本地模式由 `config.toml` 設定。若影片旁邊已有同名 `.srt`，`--translate` 會直接翻譯既有字幕並跳過 Whisper。
 
 ### 本地模型
 
@@ -76,6 +76,30 @@ sudo docker run --rm --gpus all \
   -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
   autosubtitle-gb10 /data --translate --overwrite
 ```
+
+### 只翻譯現有 SRT
+
+如果已經有英文 `.srt`，可以不跑 Whisper，直接翻譯字幕檔：
+
+```bash
+sudo docker run --rm --gpus all \
+  --network host \
+  -v "$PWD/videos:/data" \
+  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
+  autosubtitle-gb10 /data --translate-srt --recursive
+```
+
+單一字幕檔也可以：
+
+```bash
+sudo docker run --rm --gpus all \
+  --network host \
+  -v "$PWD/videos:/data" \
+  -v "$PWD/config.toml:/workspace/Autosubtitle/config.toml:ro" \
+  autosubtitle-gb10 "/data/demo.srt" --translate-srt
+```
+
+輸出檔名會像 `demo.zh-TW.srt`。
 
 ### API 模型
 

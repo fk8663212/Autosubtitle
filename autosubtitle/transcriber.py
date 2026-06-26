@@ -8,7 +8,7 @@ import whisper
 from tqdm import tqdm
 
 from autosubtitle.config import TranslationConfig
-from autosubtitle.srt import SubtitleSegment, build_srt
+from autosubtitle.srt import SubtitleSegment, build_srt, parse_srt
 from autosubtitle.translator import SubtitleTranslator
 
 
@@ -42,9 +42,16 @@ class SubtitleGenerator:
         self.overwrite = overwrite
         self.verbose = verbose
         self.translate = translate
+        self.model_name = model_name
+        self.device = device
+        self.model = None
+        self.translation_target_language = (
+            (target_language or translation_config.target_language)
+            if translation_config is not None
+            else None
+        )
         if translate and translation_config is None:
             raise ValueError("Translation config is required when translation is enabled")
-        self.model = whisper.load_model(model_name, device=device)
         self.translator = (
             SubtitleTranslator(
                 config=translation_config,
@@ -59,14 +66,29 @@ class SubtitleGenerator:
         result = BatchResult()
 
         for video_path in tqdm(video_paths, desc="Processing videos"):
-            output_path = video_path.with_suffix(".srt")
-            if output_path.exists() and not self.overwrite:
-                result.skipped += 1
-                if self.verbose:
-                    print(f"Skipped existing subtitle: {output_path}")
-                continue
-
+            source_srt_path = video_path.with_suffix(".srt")
             try:
+                if self.translator is not None and source_srt_path.exists():
+                    output_path = self._translated_srt_path(source_srt_path)
+                    if output_path.exists() and not self.overwrite:
+                        result.skipped += 1
+                        if self.verbose:
+                            print(f"Skipped existing translated subtitle: {output_path}")
+                        continue
+
+                    self._translate_existing_srt(source_srt_path, output_path)
+                    result.generated += 1
+                    if self.verbose:
+                        print(f"Generated translated subtitle: {output_path}")
+                    continue
+
+                output_path = source_srt_path
+                if output_path.exists() and not self.overwrite:
+                    result.skipped += 1
+                    if self.verbose:
+                        print(f"Skipped existing subtitle: {output_path}")
+                    continue
+
                 self._transcribe_to_srt(video_path, output_path)
                 result.generated += 1
                 if self.verbose:
@@ -77,7 +99,35 @@ class SubtitleGenerator:
 
         return result
 
+    def _translated_srt_path(self, source_srt_path: Path) -> Path:
+        if self.translation_target_language is None:
+            return source_srt_path
+        return source_srt_path.with_name(
+            f"{source_srt_path.stem}.{self.translation_target_language}.srt"
+        )
+
+    def _translate_existing_srt(self, source_srt_path: Path, output_path: Path) -> None:
+        if self.translator is None:
+            raise ValueError("Translation is not enabled")
+
+        subtitle_segments = parse_srt(source_srt_path.read_text(encoding="utf-8-sig"))
+        if not subtitle_segments:
+            raise ValueError("No valid subtitle blocks found")
+
+        translated_segments = self.translator.translate_segments(
+            subtitle_segments,
+            source_language=self.language,
+        )
+        output_path.write_text(
+            build_srt(translated_segments),
+            encoding="utf-8-sig",
+            newline="\r\n",
+        )
+
     def _transcribe_to_srt(self, video_path: Path, output_path: Path) -> None:
+        if self.model is None:
+            self.model = whisper.load_model(self.model_name, device=self.device)
+
         transcription = self.model.transcribe(
             str(video_path),
             language=self.language,
