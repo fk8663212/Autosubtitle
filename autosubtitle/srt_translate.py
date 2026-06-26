@@ -6,6 +6,7 @@ from typing import Protocol
 
 from tqdm import tqdm
 
+from autosubtitle.pathing import build_subtitle_output_path
 from autosubtitle.srt import SubtitleSegment, build_srt, parse_srt
 
 
@@ -41,12 +42,16 @@ class ExistingSrtTranslator:
         source_language: str | None,
         target_language: str,
         verbose: bool,
+        input_root: Path,
+        output_root: Path,
     ) -> None:
         self.translator = translator
         self.overwrite = overwrite
         self.source_language = source_language
         self.target_language = target_language
         self.verbose = verbose
+        self.input_root = input_root
+        self.output_root = output_root
 
     def process_files(self, srt_paths: list[Path]) -> SrtTranslationResult:
         result = SrtTranslationResult()
@@ -71,7 +76,12 @@ class ExistingSrtTranslator:
         return result
 
     def _output_path(self, srt_path: Path) -> Path:
-        return srt_path.with_name(f"{srt_path.stem}.{self.target_language}.srt")
+        return build_subtitle_output_path(
+            srt_path,
+            input_root=self.input_root,
+            output_root=self.output_root,
+            extra_suffix=f".{self.target_language}",
+        )
 
     def _translate_srt(self, srt_path: Path, output_path: Path) -> None:
         segments = parse_srt(srt_path.read_text(encoding="utf-8-sig"))
@@ -82,6 +92,7 @@ class ExistingSrtTranslator:
             segments,
             source_language=self.source_language,
         )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
             build_srt(translated_segments),
             encoding="utf-8-sig",

@@ -1,3 +1,9 @@
+[paths]
+# Default input folder for videos / existing subtitles.
+input_dir = "videos"
+# Where generated subtitles are written.
+output_dir = "videos"
+
 [translation]
 # Choose "api" for a hosted service or "local" for an OpenAI-compatible server.
 mode = "local"

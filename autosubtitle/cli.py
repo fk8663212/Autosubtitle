@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from autosubtitle.config import TranslationConfig, load_translation_config
+from autosubtitle.config import TranslationConfig, load_paths_config, load_translation_config
 from autosubtitle.video_scan import collect_video_files
 from autosubtitle.watcher import watch_video_files
 
@@ -14,8 +14,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input_dir",
+        nargs="?",
         type=Path,
-        help="Folder containing video files, or an .srt file with --translate-srt",
+        default=None,
+        help="Folder containing video files, or an .srt file with --translate-srt (default: config.toml paths.input_dir)",
     )
     parser.add_argument(
         "--config",
@@ -111,14 +113,23 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    if not args.input_dir.exists():
-        parser.error(f"Input path does not exist: {args.input_dir}")
     if args.poll_interval <= 0:
         parser.error("--poll-interval must be greater than 0")
     if args.stable_seconds < 0:
         parser.error("--stable-seconds cannot be negative")
     if args.translate_srt and args.watch:
         parser.error("--translate-srt cannot be used with --watch")
+
+    try:
+        paths_config = load_paths_config(args.config)
+    except ValueError as exc:
+        print(f"Invalid configuration: {exc}")
+        return 1
+
+    input_dir = args.input_dir or paths_config.input_dir
+    output_dir = paths_config.output_dir
+    if not input_dir.exists():
+        parser.error(f"Input path does not exist: {input_dir}")
 
     translation_config = None
     if args.translate or args.translate_srt:
@@ -129,12 +140,12 @@ def main() -> int:
             return 1
 
     if args.translate_srt:
-        return _translate_existing_srt(args, translation_config)
+        return _translate_existing_srt(args, translation_config, input_dir, output_dir)
 
-    if not args.input_dir.is_dir():
-        parser.error(f"Input path is not a directory: {args.input_dir}")
+    if not input_dir.is_dir():
+        parser.error(f"Input path is not a directory: {input_dir}")
 
-    videos = collect_video_files(args.input_dir, recursive=args.recursive)
+    videos = collect_video_files(input_dir, recursive=args.recursive)
     if not videos and not args.watch:
         print("No supported video files found.")
         return 0
@@ -162,6 +173,8 @@ def main() -> int:
             target_language=args.target_language,
             bilingual=args.bilingual,
             verbose=args.verbose,
+            input_root=input_dir,
+            output_root=output_dir,
         )
     except (ImportError, RuntimeError, ValueError) as exc:
         print(
@@ -172,7 +185,7 @@ def main() -> int:
         return 1
 
     if args.watch:
-        return _watch_folder(generator, args)
+        return _watch_folder(generator, args, input_dir)
 
     result = generator.process_files(videos)
 
@@ -186,11 +199,13 @@ def main() -> int:
 def _translate_existing_srt(
     args: argparse.Namespace,
     translation_config: TranslationConfig,
+    input_dir: Path,
+    output_dir: Path,
 ) -> int:
     from autosubtitle.srt_translate import ExistingSrtTranslator, collect_srt_files
     from autosubtitle.translator import SubtitleTranslator
 
-    srt_paths = collect_srt_files(args.input_dir, recursive=args.recursive)
+    srt_paths = collect_srt_files(input_dir, recursive=args.recursive)
     if not srt_paths:
         print("No .srt files found.")
         return 0
@@ -207,6 +222,8 @@ def _translate_existing_srt(
         source_language=args.language,
         target_language=target_language,
         verbose=args.verbose,
+        input_root=input_dir,
+        output_root=output_dir,
     )
     result = processor.process_files(srt_paths)
 
@@ -217,16 +234,16 @@ def _translate_existing_srt(
     return 0 if result.failed == 0 else 1
 
 
-def _watch_folder(generator: object, args: argparse.Namespace) -> int:
+def _watch_folder(generator: object, args: argparse.Namespace, input_dir: Path) -> int:
     print(
-        f"Watching {args.input_dir} for videos "
+        f"Watching {input_dir} for videos "
         f"(stable for {args.stable_seconds:g}s before processing)."
     )
     print("Press Ctrl+C to stop.")
 
     try:
         for video_path in watch_video_files(
-            args.input_dir,
+            input_dir,
             recursive=args.recursive,
             poll_interval=args.poll_interval,
             stable_seconds=args.stable_seconds,

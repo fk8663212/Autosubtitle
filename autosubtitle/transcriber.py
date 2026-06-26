@@ -8,6 +8,7 @@ import whisper
 from tqdm import tqdm
 
 from autosubtitle.config import TranslationConfig
+from autosubtitle.pathing import build_subtitle_output_path
 from autosubtitle.srt import SubtitleSegment, build_srt, parse_srt
 from autosubtitle.translator import SubtitleTranslator
 
@@ -33,6 +34,8 @@ class SubtitleGenerator:
         target_language: str | None,
         bilingual: bool | None,
         verbose: bool,
+        input_root: Path,
+        output_root: Path,
     ) -> None:
         device = self._resolve_device(device)
         self.fp16 = self._resolve_fp16(compute_type, device)
@@ -45,6 +48,8 @@ class SubtitleGenerator:
         self.model_name = model_name
         self.device = device
         self.model = None
+        self.input_root = input_root
+        self.output_root = output_root
         self.translation_target_language = (
             (target_language or translation_config.target_language)
             if translation_config is not None
@@ -67,22 +72,26 @@ class SubtitleGenerator:
 
         for video_path in tqdm(video_paths, desc="Processing videos"):
             source_srt_path = video_path.with_suffix(".srt")
+            output_path = build_subtitle_output_path(
+                video_path,
+                input_root=self.input_root,
+                output_root=self.output_root,
+            )
             try:
                 if self.translator is not None and source_srt_path.exists():
-                    output_path = self._translated_srt_path(source_srt_path)
-                    if output_path.exists() and not self.overwrite:
+                    translated_output_path = self._translated_srt_path(source_srt_path)
+                    if translated_output_path.exists() and not self.overwrite:
                         result.skipped += 1
                         if self.verbose:
-                            print(f"Skipped existing translated subtitle: {output_path}")
+                            print(f"Skipped existing translated subtitle: {translated_output_path}")
                         continue
 
-                    self._translate_existing_srt(source_srt_path, output_path)
+                    self._translate_existing_srt(source_srt_path, translated_output_path)
                     result.generated += 1
                     if self.verbose:
-                        print(f"Generated translated subtitle: {output_path}")
+                        print(f"Generated translated subtitle: {translated_output_path}")
                     continue
 
-                output_path = source_srt_path
                 if output_path.exists() and not self.overwrite:
                     result.skipped += 1
                     if self.verbose:
@@ -101,9 +110,16 @@ class SubtitleGenerator:
 
     def _translated_srt_path(self, source_srt_path: Path) -> Path:
         if self.translation_target_language is None:
-            return source_srt_path
-        return source_srt_path.with_name(
-            f"{source_srt_path.stem}.{self.translation_target_language}.srt"
+            return build_subtitle_output_path(
+                source_srt_path,
+                input_root=self.input_root,
+                output_root=self.output_root,
+            )
+        return build_subtitle_output_path(
+            source_srt_path,
+            input_root=self.input_root,
+            output_root=self.output_root,
+            extra_suffix=f".{self.translation_target_language}",
         )
 
     def _translate_existing_srt(self, source_srt_path: Path, output_path: Path) -> None:
@@ -118,6 +134,7 @@ class SubtitleGenerator:
             subtitle_segments,
             source_language=self.language,
         )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
             build_srt(translated_segments),
             encoding="utf-8-sig",
@@ -149,6 +166,7 @@ class SubtitleGenerator:
                 subtitle_segments,
                 source_language=transcription.get("language"),
             )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
             build_srt(subtitle_segments),
             encoding="utf-8-sig",

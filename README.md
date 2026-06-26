@@ -90,6 +90,18 @@ python -m pip install -r requirements.txt
 python -c "import torch; print(torch.cuda.is_available())"
 ```
 
+## 路徑設定
+
+`config.toml` 的 `[paths]` 可以預設影片來源和字幕輸出位置。
+
+```toml
+[paths]
+input_dir = "videos"
+output_dir = "videos"
+```
+
+如果你不在命令列指定 `input_dir`，程式會直接用 `paths.input_dir`。`output_dir` 會決定 `.srt` 寫到哪裡，子資料夾結構會一起保留。
+
 ## 使用方式
 
 掃描 `videos` 資料夾，為所有影片產生字幕：

@@ -6,6 +6,12 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
+class PathsConfig:
+    input_dir: Path
+    output_dir: Path
+
+
+@dataclass(frozen=True, slots=True)
 class EndpointConfig:
     model: str
     base_url: str
@@ -27,15 +33,28 @@ class TranslationConfig:
         return self.api if self.mode == "api" else self.local
 
 
-def load_translation_config(path: Path) -> TranslationConfig:
-    try:
-        with path.open("rb") as config_file:
-            data = tomllib.load(config_file)
-    except FileNotFoundError as exc:
-        raise ValueError(f"Config file does not exist: {path}") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"Invalid TOML config: {exc}") from exc
+DEFAULT_INPUT_DIR = Path("videos")
+DEFAULT_OUTPUT_DIR = Path("videos")
 
+
+def load_paths_config(path: Path) -> PathsConfig:
+    data = _load_config_data(path, allow_missing=True)
+    paths = data.get("paths", {})
+    if not isinstance(paths, dict):
+        raise ValueError("paths must be a TOML table")
+
+    input_dir = Path(str(paths.get("input_dir", DEFAULT_INPUT_DIR)))
+    output_dir = Path(str(paths.get("output_dir", DEFAULT_OUTPUT_DIR)))
+    if not str(input_dir).strip():
+        raise ValueError("paths.input_dir cannot be empty")
+    if not str(output_dir).strip():
+        raise ValueError("paths.output_dir cannot be empty")
+
+    return PathsConfig(input_dir=input_dir, output_dir=output_dir)
+
+
+def load_translation_config(path: Path) -> TranslationConfig:
+    data = _load_config_data(path, allow_missing=False)
     translation = data.get("translation", {})
     if not isinstance(translation, dict):
         raise ValueError("translation must be a TOML table")
@@ -60,6 +79,22 @@ def load_translation_config(path: Path) -> TranslationConfig:
         api=_load_endpoint(translation, "api", "https://api.openai.com/v1"),
         local=_load_endpoint(translation, "local", "http://127.0.0.1:11434/v1"),
     )
+
+
+def _load_config_data(path: Path, allow_missing: bool) -> dict[str, object]:
+    try:
+        with path.open("rb") as config_file:
+            data = tomllib.load(config_file)
+    except FileNotFoundError as exc:
+        if allow_missing:
+            return {}
+        raise ValueError(f"Config file does not exist: {path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid TOML config: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("Config file must contain a TOML table")
+    return data
 
 
 def _load_endpoint(
