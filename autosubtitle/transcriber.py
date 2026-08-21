@@ -31,6 +31,10 @@ class SubtitleGenerator:
         target_language: str,
         bilingual: bool,
         verbose: bool,
+        translation_provider: str = "google",
+        llm_endpoint: str | None = None,
+        llm_model: str | None = None,
+        llm_api_key: str | None = None,
     ) -> None:
         device = self._resolve_device(device)
         self.fp16 = self._resolve_fp16(compute_type, device)
@@ -44,7 +48,14 @@ class SubtitleGenerator:
         self.bilingual = bilingual
         self.model = whisper.load_model(model_name, device=device)
         self.translator = (
-            SubtitleTranslator(target_language=target_language, bilingual=bilingual)
+            SubtitleTranslator(
+                target_language=target_language,
+                bilingual=bilingual,
+                provider=translation_provider,
+                endpoint=llm_endpoint,
+                model=llm_model,
+                api_key=llm_api_key,
+            )
             if translate
             else None
         )
@@ -61,7 +72,7 @@ class SubtitleGenerator:
                 continue
 
             try:
-                self._transcribe_to_srt(video_path, output_path)
+                self.process_file(video_path, output_path)
                 result.generated += 1
                 if self.verbose:
                     print(f"Generated subtitle: {output_path}")
@@ -70,6 +81,17 @@ class SubtitleGenerator:
                 print(f"Failed to process {video_path}: {exc}")
 
         return result
+
+    def process_file(
+        self,
+        video_path: Path,
+        output_path: Path | None = None,
+    ) -> Path:
+        output_path = output_path or video_path.with_suffix(".srt")
+        if output_path.exists() and not self.overwrite:
+            raise FileExistsError(f"Subtitle already exists: {output_path}")
+        self._transcribe_to_srt(video_path, output_path)
+        return output_path
 
     def _transcribe_to_srt(self, video_path: Path, output_path: Path) -> None:
         transcription = self.model.transcribe(
@@ -93,7 +115,13 @@ class SubtitleGenerator:
                 subtitle_segments,
                 source_language=transcription.get("language"),
             )
-        output_path.write_text(build_srt(subtitle_segments), encoding="utf-8")
+        temporary_path = output_path.with_name(f".{output_path.name}.tmp")
+        try:
+            temporary_path.write_text(build_srt(subtitle_segments), encoding="utf-8")
+            temporary_path.replace(output_path)
+        except Exception:
+            temporary_path.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _resolve_device(device: str) -> str:

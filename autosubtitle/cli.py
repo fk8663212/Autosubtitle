@@ -28,9 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        default="cuda",
+        default="auto",
         choices=["auto", "cpu", "cuda"],
-        help="Inference device (default: cuda)",
+        help="Inference device (default: auto)",
     )
     parser.add_argument(
         "--compute-type",
@@ -60,6 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Translate subtitles to this language. Default: zh-TW",
     )
     parser.add_argument(
+        "--translation-provider",
+        default="google",
+        choices=["google", "ollama", "openai"],
+        help="Translation backend (default: google)",
+    )
+    parser.add_argument(
+        "--llm-endpoint",
+        default=None,
+        help="Ollama base URL or OpenAI-compatible chat completions URL",
+    )
+    parser.add_argument("--llm-model", default=None, help="LLM model name")
+    parser.add_argument("--llm-api-key", default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
         "--bilingual",
         action="store_true",
         help="Keep original text and translated text together in each subtitle block",
@@ -80,6 +93,12 @@ def main() -> int:
         parser.error(f"Input directory does not exist: {args.input_dir}")
     if not args.input_dir.is_dir():
         parser.error(f"Input path is not a directory: {args.input_dir}")
+    if args.beam_size < 1:
+        parser.error("--beam-size must be at least 1")
+    if args.bilingual and not args.translate:
+        parser.error("--bilingual requires --translate")
+    if args.translate and args.translation_provider != "google" and not args.llm_model:
+        parser.error("--llm-model is required for Ollama or OpenAI translation")
 
     videos = collect_video_files(args.input_dir, recursive=args.recursive)
     if not videos:
@@ -105,7 +124,11 @@ def main() -> int:
             beam_size=args.beam_size,
             overwrite=args.overwrite,
             translate=args.translate,
+            translation_provider=args.translation_provider,
             target_language=args.target_language,
+            llm_endpoint=args.llm_endpoint,
+            llm_model=args.llm_model,
+            llm_api_key=args.llm_api_key,
             bilingual=args.bilingual,
             verbose=args.verbose,
         )

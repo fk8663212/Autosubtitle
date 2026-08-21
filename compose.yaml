@@ -1,0 +1,56 @@
+name: autosubtitle
+
+x-autosubtitle-common: &autosubtitle-common
+  restart: unless-stopped
+  ports:
+    - "${AUTOSUB_PORT:-8000}:8000"
+  volumes:
+    - "${AUTOSUB_MEDIA_DIR:-./videos}:/data"
+    - "autosubtitle-state:/state"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment: &autosubtitle-environment
+    AUTOSUB_STATE_DIR: /state
+    AUTOSUB_UPLOAD_DIR: /state/uploads
+    AUTOSUB_ALLOWED_ROOTS: /data:/state/uploads
+    AUTOSUB_DEVICE: auto
+    AUTOSUB_MODEL: ${AUTOSUB_MODEL:-base}
+    AUTOSUB_LANGUAGE: ${AUTOSUB_LANGUAGE:-}
+    AUTOSUB_TRANSLATE: ${AUTOSUB_TRANSLATE:-false}
+    AUTOSUB_TRANSLATION_PROVIDER: ${AUTOSUB_TRANSLATION_PROVIDER:-google}
+    AUTOSUB_TARGET_LANGUAGE: ${AUTOSUB_TARGET_LANGUAGE:-zh-TW}
+    AUTOSUB_BILINGUAL: ${AUTOSUB_BILINGUAL:-false}
+    AUTOSUB_LLM_ENDPOINT: ${AUTOSUB_LLM_ENDPOINT:-}
+    AUTOSUB_LLM_MODEL: ${AUTOSUB_LLM_MODEL:-}
+    AUTOSUB_LLM_API_KEY: ${AUTOSUB_LLM_API_KEY:-}
+
+services:
+  web-gpu:
+    <<: *autosubtitle-common
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${AUTOSUB_GPU_BASE_IMAGE:-nvcr.io/nvidia/pytorch:25.11-py3}
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  web-cpu:
+    <<: *autosubtitle-common
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    profiles: ["cpu"]
+    environment:
+      <<: *autosubtitle-environment
+      AUTOSUB_DEVICE: cpu
+      AUTOSUB_COMPUTE_TYPE: float32
+
+volumes:
+  autosubtitle-state:

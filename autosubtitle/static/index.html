@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="在內網自動產生與翻譯影片字幕">
+    <title>Autosubtitle 字幕工作站</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="masthead">
+      <a class="brand" href="/">
+        <span class="brand-mark">A</span>
+        <span>Autosubtitle</span>
+      </a>
+      <div class="system-state">
+        <span id="service-dot" class="state-dot"></span>
+        <span id="service-state">連線中</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="runtime-overview reveal">
+        <div class="runtime-strip">
+          <div><span>運算裝置</span><strong id="device">--</strong></div>
+          <div><span>辨識模型</span><strong id="model">--</strong></div>
+          <div><span>翻譯</span><strong id="translation">--</strong></div>
+          <div><span>目前任務</span><strong id="current-job">閒置</strong></div>
+        </div>
+      </section>
+
+      <section class="workspace reveal delay-1">
+        <article class="panel upload-panel">
+          <div class="panel-number">01</div>
+          <div class="panel-heading">
+            <p class="kicker">立即處理</p>
+            <h2>加入影片</h2>
+          </div>
+          <form id="upload-form" class="upload-zone">
+            <input id="video-file" name="file" type="file" accept="video/*,.mkv" required>
+            <label for="video-file">
+              <span class="upload-icon">↗</span>
+              <strong id="file-label">選擇影片檔案</strong>
+              <small>MP4、MKV、MOV、AVI、M4V、WEBM</small>
+            </label>
+            <button type="submit">上傳並排入工作</button>
+            <div class="progress-track" aria-hidden="true"><span id="upload-progress"></span></div>
+          </form>
+
+          <div class="divider"><span>或使用伺服器路徑</span></div>
+          <form id="path-form" class="inline-form">
+            <input id="video-path" type="text" placeholder="/data/videos/lesson.mp4" required>
+            <button type="submit" class="compact">加入</button>
+          </form>
+          <p class="hint">只能選擇管理員允許的資料夾範圍。</p>
+        </article>
+
+        <article class="panel watch-panel">
+          <div class="panel-number">02</div>
+          <div class="panel-heading">
+            <p class="kicker">持續自動化</p>
+            <h2>監控資料夾</h2>
+          </div>
+          <form id="watch-form" class="watch-form">
+            <input id="watch-path" type="text" placeholder="/data/incoming" required>
+            <label class="check-row">
+              <input id="watch-recursive" type="checkbox">
+              <span>包含所有子資料夾</span>
+            </label>
+            <button type="submit">開始監控</button>
+          </form>
+          <div id="watch-list" class="watch-list empty-state">尚未設定監控資料夾</div>
+        </article>
+      </section>
+
+      <section class="settings-section reveal delay-2">
+        <div class="section-heading settings-heading">
+          <div>
+            <p class="kicker">GLOBAL CONFIGURATION</p>
+            <h2>全域設定</h2>
+          </div>
+          <p>儲存後從下一個任務開始生效</p>
+        </div>
+        <form id="settings-form" class="settings-card">
+          <div class="settings-grid">
+            <label class="field"><span>Whisper 模型</span><select id="setting-model">
+              <option value="tiny">Tiny · 最快</option><option value="base">Base · 輕量</option>
+              <option value="small">Small · 建議起點</option><option value="medium">Medium · 高準確度</option>
+              <option value="large-v3">Large v3 · 最高品質</option><option value="turbo">Turbo · 大模型加速版</option>
+            </select></label>
+            <label class="field"><span>辨識語言</span><select id="setting-language">
+              <option value="">自動偵測</option><option value="zh">中文</option><option value="en">英文</option>
+              <option value="ja">日文</option><option value="ko">韓文</option><option value="es">西班牙文</option>
+              <option value="fr">法文</option><option value="de">德文</option>
+            </select></label>
+            <label class="field"><span>運算裝置</span><select id="setting-device">
+              <option value="auto">自動選擇</option><option value="cuda">NVIDIA GPU</option><option value="cpu">CPU</option>
+            </select></label>
+            <label class="field"><span>運算精度</span><select id="setting-compute-type">
+              <option value="auto">自動</option><option value="float16">FP16 · GPU</option><option value="float32">FP32</option>
+            </select></label>
+            <label class="field"><span>Beam size</span><input id="setting-beam-size" type="number" min="1" max="20" value="5"></label>
+            <label class="switch-field"><span><strong>覆寫既有字幕</strong><small>遇到同名 SRT 時重新產生</small></span><input id="setting-overwrite" type="checkbox"></label>
+          </div>
+
+          <div id="translation-settings" class="translation-settings">
+            <label class="switch-field feature-switch"><span><strong>啟用字幕翻譯</strong><small>辨識完成後自動翻譯字幕內容</small></span><input id="setting-translate" type="checkbox"></label>
+            <div class="settings-grid translation-grid">
+              <label class="field"><span>翻譯後端</span><select id="setting-provider">
+                <option value="google">Google · deep-translator</option><option value="ollama">Ollama · 本地 LLM</option><option value="openai">OpenAI-compatible API</option>
+              </select></label>
+              <label class="field"><span>翻譯語言</span><select id="setting-target-language">
+                <option value="zh-TW">繁體中文</option><option value="en">英文</option><option value="ja">日文</option>
+                <option value="ko">韓文</option><option value="es">西班牙文</option><option value="fr">法文</option><option value="de">德文</option>
+                <option value="it">義大利文</option><option value="pt">葡萄牙文</option><option value="ru">俄文</option>
+                <option value="vi">越南文</option><option value="th">泰文</option><option value="id">印尼文</option><option value="ar">阿拉伯文</option>
+              </select></label>
+              <label class="switch-field"><span><strong>雙語字幕</strong><small>每段保留原文與翻譯</small></span><input id="setting-bilingual" type="checkbox"></label>
+            </div>
+            <div id="llm-fields" class="settings-grid llm-grid" hidden>
+              <label class="field"><span>LLM Endpoint</span><input id="setting-llm-endpoint" type="url" placeholder="http://localhost:11434"></label>
+              <label class="field"><span>LLM 模型</span><input id="setting-llm-model" type="text" placeholder="gemma3:12b"></label>
+              <label class="field"><span>API Key</span><input id="setting-llm-api-key" type="password" autocomplete="new-password" placeholder="留白以保留現有金鑰"><small id="api-key-state"></small></label>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <p>模型變更會在下一個任務開始時重新載入。</p>
+            <button type="submit">儲存全域設定</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="jobs-section reveal delay-2">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">PROCESS QUEUE</p>
+            <h2>工作佇列</h2>
+          </div>
+          <button id="refresh-jobs" class="text-button" type="button">重新整理</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>狀態</th>
+                <th>影片</th>
+                <th>來源</th>
+                <th>更新時間</th>
+                <th><span class="sr-only">操作</span></th>
+              </tr>
+            </thead>
+            <tbody id="jobs-body">
+              <tr><td colspan="5" class="table-empty">正在讀取工作...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

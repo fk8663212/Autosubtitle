@@ -1,11 +1,48 @@
+# Python
 .venv/
+venv/
+env/
+path/to/venv/
 __pycache__/
-*.pyc
-videos
-# Local video files
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local configuration and tools
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.codex/
+.agents/
+.DS_Store
+*.log
+
+# Runtime state and model caches
+state/
+.cache/
+*.db
+*.db-shm
+*.db-wal
+
+# User media and generated subtitles
+videos/
 *.mp4
 *.mkv
 *.mov
 *.avi
 *.m4v
 *.webm
+*.srt
+*.vtt
+
+# Container image exports and checksums
+*.tar
+*.tar.gz
+*.tgz
+*.sha256
