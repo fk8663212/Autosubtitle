@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from autosubtitle.config import TranslationConfig
 from autosubtitle.srt import SubtitleSegment
 
 
@@ -27,17 +29,40 @@ def _normalize_language_code(language: str) -> str:
 class SubtitleTranslator:
     def __init__(
         self,
-        target_language: str,
-        bilingual: bool,
+        target_language: str | None = None,
+        bilingual: bool | None = None,
         provider: str = "google",
         endpoint: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
+        config: TranslationConfig | None = None,
     ) -> None:
         from opencc import OpenCC
 
-        self.target_language = _normalize_language_code(target_language)
-        self.bilingual = bilingual
+        self.batch_size = 20
+        self.timeout_seconds = 120.0
+        if config is not None:
+            configured_endpoint = config.endpoint
+            provider = "openai"
+            endpoint = f"{configured_endpoint.base_url.rstrip('/')}/chat/completions"
+            model = configured_endpoint.model
+            api_key = (
+                os.getenv(configured_endpoint.api_key_env)
+                if configured_endpoint.api_key_env
+                else "local"
+            )
+            if not api_key:
+                raise RuntimeError(
+                    f"Environment variable {configured_endpoint.api_key_env} is required "
+                    f"for translation mode '{config.mode}'."
+                )
+            target_language = target_language or config.target_language
+            bilingual = config.bilingual if bilingual is None else bilingual
+            self.batch_size = config.batch_size
+            self.timeout_seconds = config.timeout_seconds
+
+        self.target_language = _normalize_language_code(target_language or "zh-TW")
+        self.bilingual = bool(bilingual)
         self.provider = provider.lower()
         if self.provider not in {"google", "ollama", "openai"}:
             raise ValueError(f"Unsupported translation provider: {provider}")
@@ -68,22 +93,19 @@ class SubtitleTranslator:
             source_language=normalized_source,
         )
         translated_segments: list[SubtitleSegment] = []
-
         for segment, translated in zip(segments, translated_texts, strict=True):
             translated_text = self._postprocess_text(translated)
-            merged_text = self._merge_text(segment.text, translated_text)
-            translated_segments.append(replace(segment, text=merged_text))
-
+            translated_segments.append(
+                replace(
+                    segment,
+                    text=self._merge_text(segment.text, translated_text),
+                )
+            )
         return translated_segments
 
-    def _translate_texts(
-        self,
-        texts: list[str],
-        source_language: str,
-    ) -> list[str]:
+    def _translate_texts(self, texts: list[str], source_language: str) -> list[str]:
         if not texts:
             return []
-
         if self.provider in {"ollama", "openai"}:
             return self._translate_with_llm(texts, source_language)
 
@@ -92,10 +114,8 @@ class SubtitleTranslator:
         translator = GoogleTranslator(source=source_language, target=self.target_language)
         translated: list[str] = []
         failed_texts: list[str] = []
-
-        batch_size = 50
-        for batch_start in range(0, len(texts), batch_size):
-            batch = texts[batch_start : batch_start + batch_size]
+        for batch_start in range(0, len(texts), 50):
+            batch = texts[batch_start : batch_start + 50]
             try:
                 translated_batch = translator.translate_batch(batch)
                 translated.extend(self._coerce_batch_result(batch, translated_batch))
@@ -105,38 +125,27 @@ class SubtitleTranslator:
                         translated.append(text)
                         continue
                     try:
-                        translated_text = translator.translate(text)
-                        translated.append(translated_text or text)
+                        translated.append(translator.translate(text) or text)
                     except Exception:
                         translated.append(text)
                         failed_texts.append(text)
-
         if failed_texts:
             raise RuntimeError(
                 f"Translation failed for {len(failed_texts)} subtitle line(s); retry the job"
             )
-
         return translated
 
-    def _translate_with_llm(
-        self,
-        texts: list[str],
-        source_language: str,
-    ) -> list[str]:
+    def _translate_with_llm(self, texts: list[str], source_language: str) -> list[str]:
         if not self.model:
             raise ValueError(f"A model is required for the {self.provider} provider")
-
         translated: list[str] = []
-        for batch_start in range(0, len(texts), 20):
-            batch = texts[batch_start : batch_start + 20]
+        batch_size = getattr(self, "batch_size", 20)
+        for batch_start in range(0, len(texts), batch_size):
+            batch = texts[batch_start : batch_start + batch_size]
             translated.extend(self._request_llm_batch(batch, source_language))
         return translated
 
-    def _request_llm_batch(
-        self,
-        texts: list[str],
-        source_language: str,
-    ) -> list[str]:
+    def _request_llm_batch(self, texts: list[str], source_language: str) -> list[str]:
         prompt = (
             f"Translate each subtitle from {source_language} to {self.target_language}. "
             "Preserve meaning, tone, names, and line order. Do not merge or omit items. "
@@ -170,13 +179,9 @@ class SubtitleTranslator:
             }
         else:
             if not self.endpoint:
-                raise ValueError("AUTOSUB_LLM_ENDPOINT is required for OpenAI translation")
+                raise ValueError("An OpenAI-compatible chat completions endpoint is required")
             endpoint = self.endpoint
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "temperature": 0,
-            }
+            payload = {"model": self.model, "messages": messages, "temperature": 0}
 
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -188,7 +193,10 @@ class SubtitleTranslator:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=120) as response:
+            with urlopen(
+                request,
+                timeout=getattr(self, "timeout_seconds", 120.0),
+            ) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"{self.provider} translation request failed: {exc}") from exc
@@ -205,9 +213,9 @@ class SubtitleTranslator:
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise RuntimeError("LLM translation did not return the required JSON object") from exc
         if not isinstance(translations, list) or len(translations) != len(texts):
+            count = len(translations) if isinstance(translations, list) else 0
             raise RuntimeError(
-                f"LLM returned {len(translations) if isinstance(translations, list) else 0} "
-                f"translations for {len(texts)} subtitles"
+                f"LLM returned {count} translations for {len(texts)} subtitles"
             )
         if not all(isinstance(item, str) for item in translations):
             raise RuntimeError("LLM translation contained a non-text result")
@@ -249,9 +257,10 @@ class SubtitleTranslator:
         self,
         segments: list[SubtitleSegment],
     ) -> list[SubtitleSegment]:
-        converted_segments: list[SubtitleSegment] = []
-        for segment in segments:
-            converted_text = self._opencc.convert(segment.text)
-            merged_text = self._merge_text(segment.text, converted_text)
-            converted_segments.append(replace(segment, text=merged_text))
-        return converted_segments
+        return [
+            replace(
+                segment,
+                text=self._merge_text(segment.text, self._opencc.convert(segment.text)),
+            )
+            for segment in segments
+        ]

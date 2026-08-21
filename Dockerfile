@@ -1,6 +1,8 @@
 ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.11-py3
 FROM ${BASE_IMAGE}
 
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /workspace/Autosubtitle
 
 RUN apt-get update \
@@ -13,6 +15,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY autosubtitle ./autosubtitle
 COPY main.py ./main.py
+COPY config.toml ./config.toml
 
 ENTRYPOINT ["python", "main.py"]
 CMD ["web"]

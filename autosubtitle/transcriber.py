@@ -7,7 +7,9 @@ import torch
 import whisper
 from tqdm import tqdm
 
-from autosubtitle.srt import SubtitleSegment, build_srt
+from autosubtitle.config import TranslationConfig
+from autosubtitle.pathing import build_subtitle_output_path
+from autosubtitle.srt import SubtitleSegment, build_srt, parse_srt
 from autosubtitle.translator import SubtitleTranslator
 
 
@@ -35,18 +37,24 @@ class SubtitleGenerator:
         llm_endpoint: str | None = None,
         llm_model: str | None = None,
         llm_api_key: str | None = None,
+        translation_config: TranslationConfig | None = None,
+        input_root: Path | None = None,
+        output_root: Path | None = None,
     ) -> None:
-        device = self._resolve_device(device)
-        self.fp16 = self._resolve_fp16(compute_type, device)
-
+        self.device = self._resolve_device(device)
+        self.fp16 = self._resolve_fp16(compute_type, self.device)
         self.language = language
         self.beam_size = beam_size
         self.overwrite = overwrite
         self.verbose = verbose
-        self.translate = translate
-        self.target_language = target_language
-        self.bilingual = bilingual
-        self.model = whisper.load_model(model_name, device=device)
+        self.model_name = model_name
+        self.model = None
+        self.input_root = input_root
+        self.output_root = output_root
+        self.translation_target_language = (
+            target_language
+            or (translation_config.target_language if translation_config else "zh-TW")
+        )
         self.translator = (
             SubtitleTranslator(
                 target_language=target_language,
@@ -55,6 +63,7 @@ class SubtitleGenerator:
                 endpoint=llm_endpoint,
                 model=llm_model,
                 api_key=llm_api_key,
+                config=translation_config,
             )
             if translate
             else None
@@ -62,24 +71,27 @@ class SubtitleGenerator:
 
     def process_files(self, video_paths: list[Path]) -> BatchResult:
         result = BatchResult()
-
         for video_path in tqdm(video_paths, desc="Processing videos"):
-            output_path = video_path.with_suffix(".srt")
-            if output_path.exists() and not self.overwrite:
-                result.skipped += 1
-                if self.verbose:
-                    print(f"Skipped existing subtitle: {output_path}")
-                continue
-
+            source_srt_path = video_path.with_suffix(".srt")
+            output_path = self._output_path(video_path)
             try:
+                if self.translator is not None and source_srt_path.exists():
+                    translated_output = self._translated_srt_path(source_srt_path)
+                    if translated_output.exists() and not self.overwrite:
+                        result.skipped += 1
+                        continue
+                    self._translate_existing_srt(source_srt_path, translated_output)
+                    result.generated += 1
+                    continue
+
+                if output_path.exists() and not self.overwrite:
+                    result.skipped += 1
+                    continue
                 self.process_file(video_path, output_path)
                 result.generated += 1
-                if self.verbose:
-                    print(f"Generated subtitle: {output_path}")
             except Exception as exc:
                 result.failed += 1
                 print(f"Failed to process {video_path}: {exc}")
-
         return result
 
     def process_file(
@@ -87,13 +99,42 @@ class SubtitleGenerator:
         video_path: Path,
         output_path: Path | None = None,
     ) -> Path:
-        output_path = output_path or video_path.with_suffix(".srt")
+        output_path = output_path or self._output_path(video_path)
         if output_path.exists() and not self.overwrite:
             raise FileExistsError(f"Subtitle already exists: {output_path}")
         self._transcribe_to_srt(video_path, output_path)
+        if self.verbose:
+            print(f"Generated subtitle: {output_path}")
         return output_path
 
+    def _output_path(self, source_path: Path, extra_suffix: str = "") -> Path:
+        if self.input_root is None or self.output_root is None:
+            return source_path.with_name(f"{source_path.stem}{extra_suffix}.srt")
+        return build_subtitle_output_path(
+            source_path,
+            input_root=self.input_root,
+            output_root=self.output_root,
+            extra_suffix=extra_suffix,
+        )
+
+    def _translated_srt_path(self, source_srt_path: Path) -> Path:
+        return self._output_path(
+            source_srt_path,
+            extra_suffix=f".{self.translation_target_language}",
+        )
+
+    def _translate_existing_srt(self, source_srt_path: Path, output_path: Path) -> None:
+        if self.translator is None:
+            raise ValueError("Translation is not enabled")
+        segments = parse_srt(source_srt_path.read_text(encoding="utf-8-sig"))
+        if not segments:
+            raise ValueError("No valid subtitle blocks found")
+        translated = self.translator.translate_segments(segments, self.language)
+        self._write_srt(output_path, translated)
+
     def _transcribe_to_srt(self, video_path: Path, output_path: Path) -> None:
+        if self.model is None:
+            self.model = whisper.load_model(self.model_name, device=self.device)
         transcription = self.model.transcribe(
             str(video_path),
             language=self.language,
@@ -101,8 +142,7 @@ class SubtitleGenerator:
             fp16=self.fp16,
             verbose=self.verbose,
         )
-
-        subtitle_segments = [
+        segments = [
             SubtitleSegment(
                 start=float(segment["start"]),
                 end=float(segment["end"]),
@@ -111,13 +151,18 @@ class SubtitleGenerator:
             for segment in transcription["segments"]
         ]
         if self.translator is not None:
-            subtitle_segments = self.translator.translate_segments(
-                subtitle_segments,
+            segments = self.translator.translate_segments(
+                segments,
                 source_language=transcription.get("language"),
             )
+        self._write_srt(output_path, segments)
+
+    @staticmethod
+    def _write_srt(output_path: Path, segments: list[SubtitleSegment]) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = output_path.with_name(f".{output_path.name}.tmp")
         try:
-            temporary_path.write_text(build_srt(subtitle_segments), encoding="utf-8")
+            temporary_path.write_text(build_srt(segments), encoding="utf-8-sig")
             temporary_path.replace(output_path)
         except Exception:
             temporary_path.unlink(missing_ok=True)
@@ -130,8 +175,7 @@ class SubtitleGenerator:
         if device == "cuda" and not torch.cuda.is_available():
             raise RuntimeError(
                 "CUDA was requested, but PyTorch cannot access the GPU. "
-                "Run this project in the NVIDIA PyTorch container described "
-                "in README.md, or use --device cpu."
+                "Use the NVIDIA container or select CPU."
             )
         return device
 
@@ -146,6 +190,5 @@ class SubtitleGenerator:
         if compute_type == "float32":
             return False
         raise ValueError(
-            "Unsupported compute type for OpenAI Whisper: "
-            f"{compute_type}. Choose auto, float16, or float32."
+            f"Unsupported compute type: {compute_type}. Choose auto, float16, or float32."
         )

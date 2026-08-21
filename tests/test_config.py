@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autosubtitle.config import Settings
+from autosubtitle.config import Settings, load_paths_config, load_translation_config
 
 
 def make_settings(root: Path) -> Settings:
@@ -44,6 +44,36 @@ class SettingsTest(unittest.TestCase):
             path.touch()
             with self.assertRaisesRegex(ValueError, "outside"):
                 make_settings(Path(allowed)).validate_path(path)
+
+    def test_toml_loaders_preserve_cli_paths_and_translation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                """
+[paths]
+input_dir = "incoming"
+output_dir = "subtitles"
+
+[translation]
+mode = "local"
+target_language = "zh-TW"
+
+[translation.api]
+model = "api-model"
+
+[translation.local]
+model = "local-model"
+base_url = "http://localhost:11434/v1"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            paths = load_paths_config(config_path)
+            translation = load_translation_config(config_path)
+
+            self.assertEqual(paths.input_dir, Path("incoming"))
+            self.assertEqual(paths.output_dir, Path("subtitles"))
+            self.assertEqual(translation.endpoint.model, "local-model")
 
 
 if __name__ == "__main__":

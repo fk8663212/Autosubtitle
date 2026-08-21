@@ -8,9 +8,8 @@ Autosubtitle 是可部署在一般電腦、NVIDIA GPU 工作站、GB10 或 NAS �
 - 上傳、指定路徑及資料夾監控三種工作來源
 - Whisper 語音辨識，支援 CPU 與 CUDA
 - Google、Ollama、OpenAI-compatible API 翻譯
-- 原文、翻譯或雙語字幕，預設目標語言為繁體中文 `zh-TW`
+- 翻譯既有 SRT，或輸出原文、翻譯及雙語字幕
 - SQLite 工作佇列與全域設定，服務重啟後仍會保留
-- 完成後從網頁下載 `.srt`，或直接輸出到原影片旁
 - 支援 `.mp4`、`.mkv`、`.mov`、`.avi`、`.m4v`、`.webm`
 
 ## 本機啟動
@@ -24,15 +23,9 @@ python -m pip install -r requirements.txt
 python main.py web
 ```
 
-Windows PowerShell 啟用虛擬環境：
+Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 啟用環境。啟動後開啟 `http://localhost:8000`；Whisper 模型會在第一個辨識工作開始時下載。
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-啟動後開啟 `http://localhost:8000`。Whisper 模型會在第一個辨識工作開始時下載。
-
-如果 pip 顯示 `pypi.org/simple` 缺少 URL scheme，可修正套件來源：
+如果 pip 顯示 `pypi.org/simple` 缺少 URL scheme：
 
 ```bash
 python -m pip config set global.index-url https://pypi.org/simple
@@ -50,9 +43,7 @@ python -m pip config set global.index-url https://pypi.org/simple
 
 ### 監控資料夾
 
-輸入 `/data` 或 `/data/incoming` 並選擇是否包含子資料夾。新影片的大小與修改時間保持穩定後才會排入，避免處理尚未複製完成的檔案；字幕會寫在原影片旁邊。
-
-可透過環境變數調整掃描行為：
+輸入 `/data` 或 `/data/incoming`，並選擇是否包含子資料夾。新影片保持穩定後才會排入，避免處理尚未複製完成的檔案；字幕會寫在原影片旁邊。
 
 ```dotenv
 AUTOSUB_SCAN_INTERVAL=10
@@ -63,8 +54,6 @@ AUTOSUB_OVERWRITE=false
 若已有同名字幕，預設會略過。`movie.mp4` 和 `movie.mkv` 會產生相同的 `movie.srt`，因此系統會阻止輸出路徑衝突。
 
 ## Docker 部署
-
-建立環境設定和影片資料夾：
 
 ```bash
 cp .env.example .env
@@ -83,9 +72,9 @@ NVIDIA GPU 或相容的 GB10 環境：
 docker compose --profile gpu up --build -d
 ```
 
-開啟 `http://主機IP:8000`。`.env` 的 `AUTOSUB_MEDIA_DIR` 會掛載為容器內的 `/data`。
+開啟 `http://主機IP:8000`。`.env` 的 `AUTOSUB_MEDIA_DIR` 會掛載為容器內的 `/data`。GB10 的 CUDA 說明請參考 [GB10_DGX_SPARK.md](GB10_DGX_SPARK.md)。
 
-GPU 映像預設使用 `nvcr.io/nvidia/pytorch:25.11-py3`，需要其他 CUDA/PyTorch 組合時可設定：
+GPU 映像預設使用 `nvcr.io/nvidia/pytorch:25.11-py3`，需要其他組合時可設定：
 
 ```dotenv
 AUTOSUB_GPU_BASE_IMAGE=相容的映像名稱
@@ -93,15 +82,13 @@ AUTOSUB_GPU_BASE_IMAGE=相容的映像名稱
 
 ## QNAP TS-877
 
-TS-877 使用 `linux/amd64` CPU 映像。QNAP Container Station 若不接受 Docker 29 匯出的 OCI archive，請使用 legacy Docker archive：
+TS-877 使用 `linux/amd64` CPU 映像。Container Station 若不接受 Docker 29 匯出的 OCI archive，請使用：
 
 ```text
 autosubtitle-qnap-ts877-cpu-amd64-v2-qnap-legacy.tar
 ```
 
-TAR 約 2.4 GB，已被 `.gitignore` 排除，不會上傳到 GitHub；請另外複製到 NAS。匯入後，在 Container Station 的「應用程式」使用 `compose.qnap.yaml` 建立服務。
-
-目前範例使用以下共享資料夾：
+TAR 約 2.4 GB，已被 `.gitignore` 排除，不會上傳到 GitHub，請另外複製到 NAS。匯入後使用 `compose.qnap.yaml` 建立服務。
 
 ```yaml
 volumes:
@@ -110,19 +97,15 @@ volumes:
   - /share/Container/autosubtitle/cache:/root/.cache/whisper
 ```
 
-部署步驟：
-
 1. 在 File Station 建立 `AutosubtitleVideo`，以及 `Container/autosubtitle/state`、`Container/autosubtitle/cache`。
 2. 在 Container Station 的「映像檔」匯入含 `qnap-legacy` 的 TAR。
 3. 在「應用程式」建立專案並貼入 `compose.qnap.yaml`。
 4. 確認連接埠轉送為 `主機 8000 -> 容器 8000/TCP`。
-5. 開啟 `http://QNAP-IP:8000`，監控路徑填 `/data`；不要填 NAS 主機路徑 `/share/AutosubtitleVideo`。
+5. 開啟 `http://QNAP-IP:8000`，監控路徑填 `/data`，不要填 `/share/AutosubtitleVideo`。
 
-第一次辨識需要網路下載 Whisper 模型。模型快取和 SQLite 狀態均已掛載到 NAS，重建容器後仍會保留。
+模型快取和 SQLite 狀態都掛載在 NAS，重建容器後仍會保留。
 
 ## 辨識設定
-
-Web 首頁可修改模型、來源語言、裝置、精度與 beam size。環境變數預設值如下：
 
 ```dotenv
 AUTOSUB_DEVICE=auto
@@ -152,7 +135,6 @@ AUTOSUB_TRANSLATE=true
 AUTOSUB_TRANSLATION_PROVIDER=ollama
 AUTOSUB_LLM_ENDPOINT=http://host.docker.internal:11434
 AUTOSUB_LLM_MODEL=gemma3:12b
-AUTOSUB_TARGET_LANGUAGE=zh-TW
 ```
 
 OpenAI-compatible API：
@@ -165,18 +147,32 @@ AUTOSUB_LLM_MODEL=your-model
 AUTOSUB_LLM_API_KEY=your-secret
 ```
 
-Linux 容器若無法解析 `host.docker.internal`，請改用 Ollama 主機的內網 IP，或把兩個服務加入同一個 Compose 網路。LLM 翻譯會驗證回傳字幕數量，避免翻譯漏句造成時間軸錯位。
+Linux 容器若無法解析 `host.docker.internal`，請改用 Ollama 主機的內網 IP。LLM 翻譯會驗證回傳字幕數量，避免漏句造成時間軸錯位。
 
-## CLI 模式
+## CLI 與 config.toml
+
+`config.toml` 可以設定預設輸入、輸出資料夾，以及 OpenAI-compatible API 或本地服務：
+
+```toml
+[paths]
+input_dir = "videos"
+output_dir = "videos"
+```
+
+常用命令：
 
 ```bash
 python main.py videos --recursive --model small
-python main.py videos --translate --target-language zh-TW --bilingual
+python main.py videos --watch --stable-seconds 30
+python main.py videos --translate --translation-provider google --target-language zh-TW
+python main.py subtitles --translate-srt --translation-provider google
 python main.py videos --translate --translation-provider ollama \
   --llm-endpoint http://localhost:11434 --llm-model gemma3:12b
 ```
 
-預設可存取路徑只有 `state/uploads`。Web 服務需要存取其他主機資料夾時，可設定多個允許根目錄；Linux 使用冒號，Windows 使用分號分隔：
+未指定輸入目錄時，CLI 使用 `config.toml` 的 `paths.input_dir`；字幕依 `paths.output_dir` 輸出並保留子資料夾結構。
+
+Web 服務需要存取其他主機資料夾時，可設定允許根目錄；Linux 使用冒號、Windows 使用分號分隔：
 
 ```bash
 AUTOSUB_ALLOWED_ROOTS=/mnt/videos:/mnt/shared python main.py web
