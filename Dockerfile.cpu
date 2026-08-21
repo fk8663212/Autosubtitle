@@ -10,8 +10,9 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --index-url https://download.pytorch.org/whl/cu121 torch \
+COPY requirements.txt .
+RUN python -m pip install \
+      torch --index-url https://download.pytorch.org/whl/cpu \
     && python -m pip install -r requirements.txt
 
 COPY autosubtitle ./autosubtitle
@@ -19,4 +20,4 @@ COPY main.py ./main.py
 COPY config.toml ./config.toml
 
 ENTRYPOINT ["python", "main.py"]
-CMD ["--device", "auto", "--compute-type", "auto"]
+CMD ["web"]

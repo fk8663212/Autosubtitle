@@ -1,0 +1,23 @@
+services:
+  autosubtitle:
+    image: autosubtitle:qnap-ts877-cpu-v2
+    platform: linux/amd64
+    container_name: autosubtitle
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /share/AutosubtitleVideo:/data
+      - /share/Container/autosubtitle/state:/state
+      - /share/Container/autosubtitle/cache:/root/.cache/whisper
+    environment:
+      AUTOSUB_STATE_DIR: /state
+      AUTOSUB_UPLOAD_DIR: /state/uploads
+      AUTOSUB_ALLOWED_ROOTS: /data:/state/uploads
+      AUTOSUB_DEVICE: cpu
+      AUTOSUB_COMPUTE_TYPE: float32
+      AUTOSUB_MODEL: base
+      AUTOSUB_TRANSLATE: "false"
+      AUTOSUB_TARGET_LANGUAGE: zh-TW
+      AUTOSUB_SCAN_INTERVAL: "15"
+      AUTOSUB_STABLE_SECONDS: "120"
